@@ -1,0 +1,83 @@
+import socket
+import time
+
+class Robot:
+    def __init__(self):
+        self.sonar = [0.0] * 7
+        self.bumper = [0] * 4
+        self.encoder_L = 0
+        self.encoder_R = 0
+        self.ms = 0
+        self.pose_x = 0.0
+        self.pose_y = 0.0
+        self.pose_theta = 0.0
+        self.battery = [0.0] * 3
+
+def receive_message(robot, cliente):
+    # Recebe dados do socket (até 1024 bytes)
+    resposta = cliente.recv(1024)  # bytes
+    if not resposta:
+        print("Nenhuma resposta recebida.")
+        return
+    
+    # Decodifica bytes para string e remove espaços e quebras de linha
+    texto = resposta.decode().strip()
+
+    # Divide pelos vírgulas
+    valores = texto.split(',')
+
+    # Verifica se tem dados suficientes
+    if len(valores) < 20:
+        print("Dados incompletos recebidos:", valores)
+        return
+
+    # Atualiza os atributos do objeto robot convertendo para os tipos corretos
+    try:
+        robot.sonar = list(map(float, valores[0:7]))           # índices 0 a 6
+        robot.bumper = list(map(int, valores[7:11]))           # índices 7 a 10
+        robot.encoder_L = int(valores[11])                      # índice 11
+        robot.encoder_R = int(valores[12])                      # índice 12
+        robot.ms = int(valores[13])                             # índice 13
+        robot.pose_x = float(valores[14])                       # índice 14
+        robot.pose_y = float(valores[15])                       # índice 15
+        robot.pose_theta = float(valores[16])                   # índice 16
+        robot.battery = list(map(float, valores[17:20]))        # índices 17 a 19
+    except Exception as e:
+        print("Erro ao converter dados:", e)
+
+# -- Código principal --
+
+# IP e porta da IDE (verifique com seu professor ou na documentação)
+HOST = '127.0.0.1'  # localhost ou IP da máquina rodando a IDE
+PORTA = 7000        # ou a porta usada pela IDE
+
+# Cria o objeto robot
+robot = Robot()
+
+# Conectar à IDE
+cliente = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+cliente.connect((HOST, PORTA))
+print("Conectado à IDE do robô!")
+while True:
+    # Enviar comando para iniciar a comunicação
+    # Enviar comando inicial
+    cliente.sendall(b"v0.3\n\n")
+
+    time.sleep(1)  # Dá um tempo para IDE processar e enviar dados
+
+    # Recebe e atualiza dados no objeto robot
+    receive_message(robot, cliente)
+
+    # Mostra dados recebidos
+    print("Sonares:", robot.sonar)
+    print("Bumpers:", robot.bumper)
+    print("Encoder L:", robot.encoder_L)
+    print("Encoder R:", robot.encoder_R)
+    print("Tempo (ms):", robot.ms)
+    print(f"Pose: x={robot.pose_x}, y={robot.pose_y}, theta={robot.pose_theta}")
+    print("Bateria:", robot.battery)
+    print("--------------------------------------------------")
+    # Aguarda 1 segundo antes de enviar o próximo comando
+
+
+cliente.close()
