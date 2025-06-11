@@ -5,15 +5,22 @@
 #include <iomanip>
 #include <algorithm> // Necessário para std::sort
 
+// --- Adicionado para definir M_PI se não existir ---
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 // --- 1. Configurações Globais ---
-const int LARGURA_MATRIZ = 10;
-const int ALTURA_MATRIZ = 10;
-const double DISTANCIA_PAREDE = 0.40;
-const double DISTANCIA_PAREDE_FRENTE = 0.55;
-const double TAMANHO_CELULA = 0.6;
+const int LARGURA_MATRIZ = 20;
+const int ALTURA_MATRIZ = 20;
+const double DISTANCIA_PAREDE = 0.20;
+const double DISTANCIA_PAREDE_FRENTE = 0.35;
+const double TAMANHO_CELULA = 0.35;
 const int MARCADOR_INTERSECAO = -1;
-const double DISTANCIA_ALVO_PAREDE = 0.15; // Distância exata para parar em frente a uma parede
-const int TEMPO_ROTACAO = 1000; // Tempo de espera em milissegundos após uma rotação
+const double DISTANCIA_ALVO_PAREDE = 0.06; // Distância exata para parar em frente a uma parede
+const double DISTANCIA_ALVO_PAREDE_DIAGONAL = 0.15; // Distância exata para parar em frente a uma parede
+const int TEMPO_ROTACAO = 1500; // Tempo de espera em milissegundos após uma rotação
+const double VELOCIDADE = 0.3;
 
 // Posição inicial do robô
 const int START_X = LARGURA_MATRIZ / 2;
@@ -29,14 +36,18 @@ struct Opcao {
 
 void obter_coordenadas_matriz(EdubotLib* edubotLib, int& x, int& y);
 void imprimir_mapa(int robo_x, int robo_y);
-int decidir_e_executar_movimento(EdubotLib* edubotLib, int robo_x, int robo_y, bool frente_livre, bool esquerda_livre, bool direita_livre);
+int decidir_e_executar_movimento(EdubotLib* edubotLib, int robo_x, int robo_y, bool frente_livre, bool esquerda_livre, bool direita_livre, double theta);
 void atualizar_mapeamento(int& mapa_x, int& mapa_y, int& prev_mapa_x, int& prev_mapa_y, int acao_rotacao, bool frente_livre, bool esquerda_livre, bool direita_livre);
+double snap_angle_to_grid(double angle);
+bool verificar_saida_labirinto(const double sonar[]);
+void calibrar_antes_de_virar(EdubotLib* edubotLib, int rotacao); // <<-- NOVA FUNÇÃO UNIFICADA
 
 
 // --- 3. Programa Principal ---
 int main() {
     EdubotLib* edubotLib = new EdubotLib();
     double sonar[7];
+    double theta;
     
     int mapa_x = START_X;
     int mapa_y = START_Y;
@@ -49,28 +60,43 @@ int main() {
         while (edubotLib->isConnected()) { 
             
             imprimir_mapa(mapa_x, mapa_y);
-            edubotLib->stop(); 
-
+            edubotLib->stop();
+            
             // 1. Percepção
             for(int i = 0; i < 7; i++) {
                 sonar[i] = edubotLib->getSonar(i); 
             }
+            theta = edubotLib->getTheta(); 
+
+            // 2. Verificação de Saída
+            if (verificar_saida_labirinto(sonar)) {
+                std::cout << "LABIRINTO CONCLUIDO!" << std::endl;
+                edubotLib->stop();
+                break; 
+            }
             
-            // 2. VERIFICAÇÃO ÚNICA dos caminhos
+            // 3. Verificação dos Caminhos
             bool frente_livre = sonar[3] > DISTANCIA_PAREDE_FRENTE;
             bool esquerda_livre = sonar[6] > DISTANCIA_PAREDE;
             bool direita_livre = sonar[0] > DISTANCIA_PAREDE;
             
-            // LINHA ADICIONADA PARA IMPRIMIR OS VALORES (1=livre, 0=bloqueado)
             std::cout << "Status dos Caminhos -> Frente: " << frente_livre 
                       << ", Esquerda: " << esquerda_livre 
                       << ", Direita: " << direita_livre << std::endl;
 
-            // 3. Ação: Robô decide e se move
-            int acao_rotacao = decidir_e_executar_movimento(edubotLib, mapa_x, mapa_y, frente_livre, esquerda_livre, direita_livre);
-
-            // 4. Mapeamento: Atualiza a posição e o mapa
+            // 4. Ação
+            int acao_rotacao = decidir_e_executar_movimento(edubotLib, mapa_x, mapa_y, frente_livre, esquerda_livre, direita_livre, theta);
+            
+            // 5. Mapeamento
             obter_coordenadas_matriz(edubotLib, mapa_x, mapa_y);
+            
+            for(int i = 0; i < 7; i++) {
+                sonar[i] = edubotLib->getSonar(i);
+            }
+            frente_livre = sonar[3] > DISTANCIA_PAREDE_FRENTE;
+            esquerda_livre = sonar[6] > DISTANCIA_PAREDE;
+            direita_livre = sonar[0] > DISTANCIA_PAREDE;
+
             atualizar_mapeamento(mapa_x, mapa_y, prev_mapa_x, prev_mapa_y, acao_rotacao, frente_livre, esquerda_livre, direita_livre);
         }
 
@@ -84,8 +110,17 @@ int main() {
 
 // --- 4. Implementação das Funções ---
 
+bool verificar_saida_labirinto(const double sonar[]) {
+    int sensores_livres = 0;
+    for (int i = 0; i < 7; ++i) {
+        if (sonar[i] > 2.0) {
+            sensores_livres++;
+        }
+    }
+    return sensores_livres > 3;
+}
+
 void imprimir_mapa(int robo_x, int robo_y) {
-    // Comando para limpar o console (multiplataforma)
     #ifdef _WIN32
         system("cls");
     #else
@@ -123,7 +158,6 @@ void obter_coordenadas_matriz(EdubotLib* edubotLib, int& x, int& y) {
 void atualizar_mapeamento(int& mapa_x, int& mapa_y, int& prev_mapa_x, int& prev_mapa_y, int acao_rotacao, bool frente_livre, bool esquerda_livre, bool direita_livre) {
     if (mapa_x != prev_mapa_x || mapa_y != prev_mapa_y) {
         if (mapa_x >= 0 && mapa_x < LARGURA_MATRIZ && mapa_y >= 0 && mapa_y < ALTURA_MATRIZ) {
-            
             int caminhos_livres = (frente_livre ? 1 : 0) + (esquerda_livre ? 1 : 0) + (direita_livre ? 1 : 0);
 
             if (caminhos_livres > 1 && mapa_visitas[mapa_x][mapa_y] == 0) {
@@ -143,50 +177,112 @@ void atualizar_mapeamento(int& mapa_x, int& mapa_y, int& prev_mapa_x, int& prev_
     }
 }
 
-int decidir_e_executar_movimento(EdubotLib* edubotLib, int robo_x, int robo_y, bool frente_livre, bool esquerda_livre, bool direita_livre) {
+double snap_angle_to_grid(double angle) {
+    if (angle >= -45.0 && angle < 45.0) return 0.0;
+    if (angle >= 45.0 && angle < 135.0) return 90.0;
+    if (angle >= -135.0 && angle < -45.0) return -90.0;
+    return 180.0;
+}
+
+// <<-- NOVA FUNÇÃO DE CALIBRAÇÃO UNIFICADA -->>
+void calibrar_antes_de_virar(EdubotLib* edubotLib, int rotacao) {
+	edubotLib->sleepMilliseconds(100); 
+	edubotLib->stop();
+    double sonar_frente = edubotLib->getSonar(3);
+
+    // Se houver parede na frente, calibra por ela
+    if (sonar_frente < ((TAMANHO_CELULA*2)-DISTANCIA_ALVO_PAREDE) ) {
+        int num_celulas = round((sonar_frente - DISTANCIA_ALVO_PAREDE) / TAMANHO_CELULA);
+        if (num_celulas < 1){
+        	num_celulas = 0;
+        } else{
+        		double distancia_alvo_dinamica = (num_celulas * TAMANHO_CELULA) + DISTANCIA_ALVO_PAREDE+0.05;
+	        double erro_distancia = sonar_frente - distancia_alvo_dinamica;
+	        double tolerancia = 0.01;
+	
+	        if (std::abs(erro_distancia) < 0.25) {
+	            std::cout << "Calibrando para distancia frontal de " << distancia_alvo_dinamica << "m..." << std::endl;
+	            while(std::abs(erro_distancia) > tolerancia) {
+	                if (erro_distancia > 0) edubotLib->move(0.1);
+	                else edubotLib->move(-0.1);
+	                edubotLib->sleepMilliseconds(50);
+	                edubotLib->stop();
+	                sonar_frente = edubotLib->getSonar(3);
+	                erro_distancia = sonar_frente - distancia_alvo_dinamica;
+	            }
+	            std::cout << "Distancia frontal calibrada." << std::endl;
+	        }
+        }
+
+	        
+    } 
+    // Senão, tenta calibrar pela parede lateral
+    else {
+        std::cout << "Verificando necessidade de ajuste lateral..." << std::endl;
+        int sonar_index = (rotacao == -90) ? 1 : 5;
+        if (edubotLib->getSonar(sonar_index) < 0.5) {
+            std::cout << "Ajustando distancia lateral para a curva..." << std::endl;
+            const double angulo_sonar_rad = 60.0 * M_PI / 180.0;
+            double distancia_perp = cos(angulo_sonar_rad) * edubotLib->getSonar(sonar_index);
+            double erro_distancia = distancia_perp - DISTANCIA_ALVO_PAREDE_DIAGONAL;
+            double tolerancia = 0.01;
+            while(std::abs(erro_distancia) > tolerancia) {
+                if (erro_distancia > 0) edubotLib->move(0.1);
+                else edubotLib->move(-0.1);
+                edubotLib->sleepMilliseconds(50);
+                edubotLib->stop();
+                distancia_perp = cos(angulo_sonar_rad) * edubotLib->getSonar(sonar_index);
+                erro_distancia = distancia_perp - DISTANCIA_ALVO_PAREDE_DIAGONAL;
+            }
+            std::cout << "Distancia lateral para curva ajustada." << std::endl;
+        }
+    }
+}
+
+
+int decidir_e_executar_movimento(EdubotLib* edubotLib, int robo_x, int robo_y, bool frente_livre, bool esquerda_livre, bool direita_livre, double theta) {
     std::vector<Opcao> opcoes_validas;
+    double angulo_grid = snap_angle_to_grid(theta);
 
-    if (frente_livre) {
-        opcoes_validas.push_back({0, mapa_visitas[robo_x][robo_y-1]});
-    }
-    if (esquerda_livre) {
-        opcoes_validas.push_back({90, mapa_visitas[robo_x-1][robo_y]});
-    }
-    if (direita_livre) {
-        opcoes_validas.push_back({-90, mapa_visitas[robo_x+1][robo_y]});
-    }
+    double angulo_rad = angulo_grid * M_PI / 180.0;
+    
+    int dx_frente = round(cos(angulo_rad));
+    int dy_frente = round(sin(angulo_rad));
+    dy_frente = -dy_frente;
 
-    // <<-- LÓGICA REFINADA PARA MARCAR INTERSEÇÕES EXPLORADAS -->>
+    int x_frente = robo_x + dx_frente;
+    int y_frente = robo_y + dy_frente;
+    
+    int x_direita = robo_x + dy_frente;
+    int y_direita = robo_y - dx_frente;
+    
+    int x_esquerda = robo_x - dy_frente;
+    int y_esquerda = robo_y + dx_frente;
+
+    if (frente_livre) opcoes_validas.push_back({0, mapa_visitas[x_frente][y_frente]});
+    if (esquerda_livre) opcoes_validas.push_back({90, mapa_visitas[x_esquerda][y_esquerda]});
+    if (direita_livre) opcoes_validas.push_back({-90, mapa_visitas[x_direita][y_direita]});
+
     if (mapa_visitas[robo_x][robo_y] == MARCADOR_INTERSECAO) {
         bool todas_saidas_de_corredor_exploradas = true;
         int saidas_para_corredor = 0;
-
-        if (opcoes_validas.empty()) {
-            todas_saidas_de_corredor_exploradas = false; 
-        }
+        if (opcoes_validas.empty()) todas_saidas_de_corredor_exploradas = true; 
 
         for (const auto& opcao : opcoes_validas) {
-            // Considera apenas as saídas que NÃO são outras interseções
             if (opcao.visitas != MARCADOR_INTERSECAO) {
                 saidas_para_corredor++;
-                // Se encontrar um único caminho de corredor que não foi totalmente explorado,
-                // a interseção atual ainda não está esgotada.
                 if (opcao.visitas < 2) {
                     todas_saidas_de_corredor_exploradas = false;
                     break;
                 }
             }
         }
-
-        // A interseção só é marcada como '2' se tiver pelo menos uma saída para um corredor
-        // e TODAS essas saídas de corredor já tiverem sido visitadas 2 vezes.
         if (saidas_para_corredor > 0 && todas_saidas_de_corredor_exploradas) {
             mapa_visitas[robo_x][robo_y] = 2;
         }
     }
 
     if (opcoes_validas.empty()) {
-    	   edubotLib->sleepMilliseconds(100);
         edubotLib->rotate(180);
         edubotLib->sleepMilliseconds(TEMPO_ROTACAO);
         return 180;
@@ -194,26 +290,26 @@ int decidir_e_executar_movimento(EdubotLib* edubotLib, int robo_x, int robo_y, b
 
     std::sort(opcoes_validas.begin(), opcoes_validas.end(), [](const Opcao& a, const Opcao& b) {
         if (a.visitas != b.visitas) return a.visitas < b.visitas;
-        return a.rotacao > b.rotacao; // Prefere Esquerda > Frente > Direita
+        return a.rotacao > b.rotacao;
     });
 
     Opcao melhor_opcao = opcoes_validas[0];
 
+    // Se a melhor opção é virar...
     if (melhor_opcao.rotacao != 0) {
-    	edubotLib->sleepMilliseconds(100);
+        // ...chama a rotina de calibração unificada.
+        calibrar_antes_de_virar(edubotLib, melhor_opcao.rotacao);
+        
         edubotLib->rotate(melhor_opcao.rotacao);
         edubotLib->sleepMilliseconds(TEMPO_ROTACAO);
     }
     
-    // Se o robô decidiu andar para frente
     double x_inicial = edubotLib->getX();
     double y_inicial = edubotLib->getY();
     double distancia_percorrida = 0.0;
-    
-    edubotLib->move(0.5); 
+    edubotLib->move(VELOCIDADE); 
 
-    // Loop de movimento principal com dupla condição de paragem
-    while (distancia_percorrida < TAMANHO_CELULA && edubotLib->getSonar(3) > (DISTANCIA_ALVO_PAREDE + 0.05) ) {
+    while (distancia_percorrida < TAMANHO_CELULA && edubotLib->getSonar(3) > (DISTANCIA_ALVO_PAREDE + 0.05)) {
         double dx = edubotLib->getX() - x_inicial;
         double dy = edubotLib->getY() - y_inicial;
         distancia_percorrida = std::sqrt(dx * dx + dy * dy);
@@ -221,20 +317,15 @@ int decidir_e_executar_movimento(EdubotLib* edubotLib, int robo_x, int robo_y, b
     }
     edubotLib->stop();
 
-    // Se o robô parou perto de uma parede (e não porque completou a célula)
     if (edubotLib->getSonar(3) < TAMANHO_CELULA) {
         double distancia_atual = edubotLib->getSonar(3);
         double erro_distancia = distancia_atual - DISTANCIA_ALVO_PAREDE;
-        double tolerancia = 0.01; // 1cm
-
-        // Loop de ajuste fino para chegar à distância exata
+        double tolerancia = 0.01;
         while(std::abs(erro_distancia) > tolerancia) {
-            if (erro_distancia > 0) edubotLib->move(0.1); // Muito longe, avança devagar
-            else edubotLib->move(-0.1); // Muito perto, recua devagar
-            
+            if (erro_distancia > 0) edubotLib->move(0.1);
+            else edubotLib->move(-0.1);
             edubotLib->sleepMilliseconds(50);
             edubotLib->stop();
-            
             distancia_atual = edubotLib->getSonar(3);
             erro_distancia = distancia_atual - DISTANCIA_ALVO_PAREDE;
         }
