@@ -11,16 +11,17 @@
 #endif
 
 // --- 1. Configurações Globais ---
-const int LARGURA_MATRIZ = 20;
-const int ALTURA_MATRIZ = 20;
-const double DISTANCIA_PAREDE = 0.20;
-const double DISTANCIA_PAREDE_FRENTE = 0.35;
-const double TAMANHO_CELULA = 0.35;
-const int MARCADOR_INTERSECAO = -1;
-const double DISTANCIA_ALVO_PAREDE = 0.06; // Distância exata para parar em frente a uma parede
-const double DISTANCIA_ALVO_PAREDE_DIAGONAL = 0.15; // Distância exata para parar em frente a uma parede
-const int TEMPO_ROTACAO = 1500; // Tempo de espera em milissegundos após uma rotação
-const double VELOCIDADE = 0.3;
+const int LARGURA_MATRIZ = 15;                     // Largura da matriz que representa o mapa
+const int ALTURA_MATRIZ = 15;                      // Altura da matriz
+const double DISTANCIA_PAREDE = 0.40;              // Distância mínima para considerar um caminho lateral livre
+const double DISTANCIA_PAREDE_FRENTE = 0.55;       // Distância mínima para considerar o caminho frontal livre
+const double TAMANHO_CELULA = 0.55;                // Tamanho de cada célula do mapa em metros
+const int MARCADOR_INTERSECAO = -1;                // Valor especial na matriz para identificar uma interseção
+const int MARCADOR_SAIDA = -2;                     // Marcador para a saída
+const double DISTANCIA_ALVO_PAREDE = 0.10;         // Distância exata que o robô tenta manter de uma parede em frente
+const double DISTANCIA_ALVO_PAREDE_DIAGONAL = 0.15; // Distância alvo para a parede ao calibrar lateralmente
+const int TEMPO_ROTACAO = 1500;                    // Tempo de espera em milissegundos após uma rotação para estabilizar
+const double VELOCIDADE = 0.3;              // Velocidade padrão de movimento do robô
 
 // Posição inicial do robô
 const int START_X = LARGURA_MATRIZ / 2;
@@ -40,10 +41,10 @@ int decidir_e_executar_movimento(EdubotLib* edubotLib, int robo_x, int robo_y, b
 void atualizar_mapeamento(int& mapa_x, int& mapa_y, int& prev_mapa_x, int& prev_mapa_y, int acao_rotacao, bool frente_livre, bool esquerda_livre, bool direita_livre);
 double snap_angle_to_grid(double angle);
 bool verificar_saida_labirinto(const double sonar[]);
-void calibrar_antes_de_virar(EdubotLib* edubotLib, int rotacao); // <<-- NOVA FUNÇÃO UNIFICADA
+void calibrar_antes_de_virar(EdubotLib* edubotLib, int rotacao);
 
 
-// --- 3. Programa Principal ---
+// --- 3. Programa Principal (Refatorado) ---
 int main() {
     EdubotLib* edubotLib = new EdubotLib();
     double sonar[7];
@@ -90,6 +91,7 @@ int main() {
             // 5. Mapeamento
             obter_coordenadas_matriz(edubotLib, mapa_x, mapa_y);
             
+            // Lê os sensores novamente para ter a informação do novo estado
             for(int i = 0; i < 7; i++) {
                 sonar[i] = edubotLib->getSonar(i);
             }
@@ -113,7 +115,7 @@ int main() {
 bool verificar_saida_labirinto(const double sonar[]) {
     int sensores_livres = 0;
     for (int i = 0; i < 7; ++i) {
-        if (sonar[i] > 2.0) {
+        if (sonar[i] >= 2.0) {
             sensores_livres++;
         }
     }
@@ -184,37 +186,35 @@ double snap_angle_to_grid(double angle) {
     return 180.0;
 }
 
-// <<-- NOVA FUNÇÃO DE CALIBRAÇÃO UNIFICADA -->>
+// <<-- FUNÇÃO DE CALIBRAÇÃO UNIFICADA E CORRIGIDA -->>
 void calibrar_antes_de_virar(EdubotLib* edubotLib, int rotacao) {
-	edubotLib->sleepMilliseconds(100); 
-	edubotLib->stop();
+    edubotLib->sleepMilliseconds(100); 
+    edubotLib->stop();
     double sonar_frente = edubotLib->getSonar(3);
 
     // Se houver parede na frente, calibra por ela
-    if (sonar_frente < ((TAMANHO_CELULA*2)-DISTANCIA_ALVO_PAREDE) ) {
+    if (sonar_frente < ((TAMANHO_CELULA * 2) - DISTANCIA_ALVO_PAREDE)) {
         int num_celulas = round((sonar_frente - DISTANCIA_ALVO_PAREDE) / TAMANHO_CELULA);
-        if (num_celulas < 1){
-        	num_celulas = 0;
-        } else{
-        		double distancia_alvo_dinamica = (num_celulas * TAMANHO_CELULA) + DISTANCIA_ALVO_PAREDE+0.05;
-	        double erro_distancia = sonar_frente - distancia_alvo_dinamica;
-	        double tolerancia = 0.01;
-	
-	        if (std::abs(erro_distancia) < 0.25) {
-	            std::cout << "Calibrando para distancia frontal de " << distancia_alvo_dinamica << "m..." << std::endl;
-	            while(std::abs(erro_distancia) > tolerancia) {
-	                if (erro_distancia > 0) edubotLib->move(0.1);
-	                else edubotLib->move(-0.1);
-	                edubotLib->sleepMilliseconds(50);
-	                edubotLib->stop();
-	                sonar_frente = edubotLib->getSonar(3);
-	                erro_distancia = sonar_frente - distancia_alvo_dinamica;
-	            }
-	            std::cout << "Distancia frontal calibrada." << std::endl;
-	        }
+        if (num_celulas < 1) {
+            num_celulas = 0;
         }
+        
+        double distancia_alvo_dinamica = (num_celulas * TAMANHO_CELULA) + DISTANCIA_ALVO_PAREDE + 0.05;
+        double erro_distancia = sonar_frente - distancia_alvo_dinamica;
+        double tolerancia = 0.01;
 
-	        
+        if (std::abs(erro_distancia) < 0.25) {
+            std::cout << "Calibrando para distancia frontal de " << distancia_alvo_dinamica << "m..." << std::endl;
+            while(std::abs(erro_distancia) > tolerancia) {
+                if (erro_distancia > 0) edubotLib->move(0.1);
+                else edubotLib->move(-0.1);
+                edubotLib->sleepMilliseconds(10);
+                edubotLib->stop();
+                sonar_frente = edubotLib->getSonar(3);
+                erro_distancia = sonar_frente - distancia_alvo_dinamica;
+            }
+            std::cout << "Distancia frontal calibrada." << std::endl;
+        }
     } 
     // Senão, tenta calibrar pela parede lateral
     else {
@@ -290,7 +290,7 @@ int decidir_e_executar_movimento(EdubotLib* edubotLib, int robo_x, int robo_y, b
 
     std::sort(opcoes_validas.begin(), opcoes_validas.end(), [](const Opcao& a, const Opcao& b) {
         if (a.visitas != b.visitas) return a.visitas < b.visitas;
-        return a.rotacao > b.rotacao;
+        return a.rotacao > b.rotacao; // Esquerda (90) > Frente (0) > Direita (-90)
     });
 
     Opcao melhor_opcao = opcoes_validas[0];
