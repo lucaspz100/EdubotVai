@@ -15,20 +15,29 @@ enum Direcao { NORTE, LESTE, SUL, OESTE };
 const int SONAR_FRONTAL = 3, SONAR_DIREITA_EXTREMO = 6, SONAR_DIREITA_INTERNO = 5, SONAR_ESQUERDA_EXTREMO = 0, SONAR_ESQUERDA_INTERNO = 1;
 const double DISTANCIA_PAREDE = 0.35;
 const double DISTANCIA_SAIDA = 2.0;
-const double TURNING_RANGE = 0.035; // Espaço mínimo (20cm) necessário para virar
+const double TURNING_RANGE = 0.036; // Espaço mínimo (20cm) necessário para virar
 
 // =================================================================
 // CONSTANTES PARA OS CONTROLADORES PID
 // =================================================================
 // PID para ajuste de DISTÂNCIA frontal
 const double DISTANCIA_ALVO_PAREDE = 0.04; 
-const double KP_DIST = 1.5;  // Ganho Proporcional para distância
+const double KP_DIST = 1.0;  // Ganho Proporcional para distância
 const double KI_DIST = 0.01; // Ganho Integral para distância
 const double KD_DIST = 0.1;  // Ganho Derivativo para distância
 
 const double PI = 3.14159265358979323846;
 const double RAIO_SENSORES = 0.11; // 110mm convertidos para metros
-const double DISTANCIA_ENTRE_SONARES = RAIO_SENSORES * (1.0 - std::cos(30.0 * PI / 180.0));
+const double DISTANCIA_ENTRE_SONARES = 0.0181;
+
+
+
+const double KP_ANG = 80.0; // Ganho Proporcional para reagir fortemente ao erro.
+const double KI_ANG = 0.01; // Ganho Integral pequeno para evitar wind-up.
+const double KD_ANG = 2.0;  // Ganho Derivativo para amortecer a resposta.
+
+
+
 
 // A Célula armazena apenas as marcações para a navegação
 struct Celula {
@@ -75,50 +84,19 @@ void garantir_espaco_de_giro(EdubotLib* edubotLib, int angulo_rotacao) {
     
     while (edubotLib->getSonar(sonar_a_verificar) < TURNING_RANGE) {
         std::cout << "Pouco espaco no lado " << nome_lado_verificado << " para virar! Recuando..." << std::endl;
-        edubotLib->move(-0.2); // Move para trás lentamente
+        edubotLib->rotate(-angulo_rotacao/45);
         edubotLib->sleepMilliseconds(400);
+        edubotLib->move(-0.2); // Move para trás lentamente
+        edubotLib->sleepMilliseconds(200);
+        edubotLib->rotate(angulo_rotacao/45);
+        edubotLib->sleepMilliseconds(400);
+        edubotLib->move(0.2); // Move para trás lentamente
+        edubotLib->sleepMilliseconds(200);
         edubotLib->stop();
-        edubotLib->sleepMilliseconds(200); 
+        edubotLib->sleepMilliseconds(200);
     }
 }
 
-void recuperarDeColisao(EdubotLib* edubotLib, int tipoColisao) {
-    std::cout << "COLISAO DETECTADA! Iniciando manobra de recuperacao..." << std::endl;
-    
-    if (tipoColisao > 0) {
-        std::cout << "Movendo para tras..." << std::endl;
-        edubotLib->move(-0.2);
-    } else {
-        std::cout << "Movendo para frente..." << std::endl;
-        edubotLib->move(0.2);
-    }
-    edubotLib->sleepMilliseconds(300); 
-    edubotLib->stop();
-    edubotLib->sleepMilliseconds(200);
-
-    switch (tipoColisao) {
-        case 1: std::cout << "Girando para a direita para desviar..." << std::endl; edubotLib->rotate(45); edubotLib->sleepMilliseconds(1000); break;
-        case 2: std::cout << "Girando para a esquerda para desviar..." << std::endl; edubotLib->rotate(-45); edubotLib->sleepMilliseconds(1000); break;
-        case 3: std::cout << "Girando 90 graus para a esquerda..." << std::endl; edubotLib->rotate(-90); edubotLib->sleepMilliseconds(1500); break;
-        case -1: std::cout << "Girando para a direita para desviar..." << std::endl; edubotLib->rotate(45); edubotLib->sleepMilliseconds(1000); break;
-        case -2: std::cout << "Girando para a esquerda para desviar..." << std::endl; edubotLib->rotate(-45); edubotLib->sleepMilliseconds(1000); break;
-        case -3: std::cout << "Girando 90 graus para a esquerda..." << std::endl; edubotLib->rotate(-90); edubotLib->sleepMilliseconds(1500); break;
-    }
-    edubotLib->stop();
-    std::cout << "Manobra de recuperacao concluida." << std::endl;
-}
-
-int verificarColisao(EdubotLib* edubotLib) {
-    bool fe = edubotLib->getBumper(0);
-    bool fd = edubotLib->getBumper(1);
-    bool te = edubotLib->getBumper(2);
-    bool td = edubotLib->getBumper(3);
-
-    if (fe && fd) return 3; if (fe) return 1; if (fd) return 2;
-    if (te && td) return -3; if (te) return -1; if (td) return -2;
-    
-    return 0;
-}
 
 // --- FUNÇÕES DE MOVIMENTO (Atualizadas para incluir recalibração pré-giro) ---
 
@@ -200,11 +178,6 @@ int main() {
             
             edubotLib->sleepMilliseconds(200);
 
-            int tipoColisao = verificarColisao(edubotLib);
-            if (tipoColisao != 0) {
-                recuperarDeColisao(edubotLib, tipoColisao);
-                continue;
-            }
 
             if (verificarSaidaDoLabirinto(edubotLib)) {
                 std::cout << "\n\n*** SAIDA DO LABIRINTO ENCONTRADA! ***" << std::endl;
